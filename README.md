@@ -23,7 +23,7 @@ The script supports XAMPP installed at `C:\xampp` or `D:\Xampp`. It does not con
 
 The PHP controller requires PHP 8+, cURL, `proc_open`, `mbstring`, Windows PowerShell, and the usual XAMPP PHP path (`D:\Xampp\php\php.exe` or `C:\xampp\php\php.exe`). The Playwright service requires Node.js, the installed npm dependencies, and Google Chrome at `C:\Program Files\Google\Chrome\Application\chrome.exe`.
 
-Install/update Playwright dependencies from its folder with `npm install`. Its server listens on `127.0.0.1:3011`; it is not exposed to other machines. Apache access to the service source folders is denied by their `.htaccess` files. The dashboard API also requires a loopback client, a local Host header, and a custom same-origin request header for controls/logs.
+Install/update Playwright dependencies from its folder with `npm install`. Its server listens on `127.0.0.1:3011`; the dashboard shows and uses the configured HTTPS Tailscale Funnel endpoint (`BOTDECK_PUBLIC_HOST`, default `desktop-4ajaj6b.taile1603c.ts.net`). Configure Tailscale Funnel separately so that hostname forwards HTTPS traffic to local port 3011. The service itself still binds only to loopback. Apache access to the service source folders is denied by their `.htaccess` files. The dashboard API also requires a loopback client, a local Host header, and a custom same-origin request header for controls/logs.
 
 ## Dashboard health indicators
 
@@ -51,7 +51,7 @@ The Telegram bot test only checks invalid-token rejection; do not put a real bot
 - **Controller unavailable:** Start Apache and check `http://localhost/all_bot/api.php?action=status`.
 - **PHP will not start:** Confirm PHP 8+, cURL, `proc_open`, and the configured XAMPP PHP executable.
 - **Playwright startup fails:** Check the service Logs action, make sure port 3011 is free, install dependencies with `npm install`, and verify the Chrome executable path.
-- **Playwright says endpoint unreachable:** Confirm nothing else is using port 3011 and that the service listens on loopback.
+- **Playwright says endpoint unreachable:** Confirm nothing else is using port 3011, that the service listens on loopback, and that Tailscale Funnel forwards the configured hostname to port 3011.
 - **Telegram polling error:** Check the token with BotFather and ensure the PHP host can reach `api.telegram.org`.
 - **Controls return 403:** Open the dashboard through `http://localhost/all_bot/` or `http://127.0.0.1/all_bot/` and use the same host consistently; remote/LAN access is intentionally blocked.
 

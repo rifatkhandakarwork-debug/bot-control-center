@@ -1,13 +1,13 @@
 # Local Playwright service
 
-`playwright-server.js` is the active Node service. It binds to `127.0.0.1:3011` and only accepts browser automation requests from HTTP localhost origins. `/session` and `/submit` require a local Origin and the expected local Host header. Do not proxy this service to a public interface.
+`playwright-server.js` is the active Node service. It binds to `127.0.0.1:3011`. Local requests must use HTTP localhost; requests through Tailscale Funnel must use the configured HTTPS hostname in `BOTDECK_PUBLIC_HOST`. `/session` and `/submit` validate both Origin and Host. Do not expose this service on a public interface outside the configured Tailscale Funnel.
 
 ## Start on Windows
 
-1. Install Node.js and Google Chrome.
+1. Install Node.js, Google Chrome, and configure Tailscale Funnel for the hostname shown in Bot Manager.
 2. From this folder, run `npm install` once.
 3. Start it from Bot Manager or run `start-local.bat` for manual use.
-4. Check `http://127.0.0.1:3011/health` for the HTTP process status. Add `?deep=1` to verify Chrome can render a local page; this check does not contact the verification site.
+4. Check `http://127.0.0.1:3011/health` locally, or `https://<BOTDECK_PUBLIC_HOST>/health` through Tailscale Funnel. Add `?deep=1` to verify Chrome can render a local page; this check does not contact the verification site.
 
 Bot Manager shuts down its managed instance through a random process control token held in the local process state. A manually launched instance has no dashboard control token; stop it from its original terminal with Ctrl+C. Run only one instance on port 3011.
 

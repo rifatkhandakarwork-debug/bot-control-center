@@ -40,9 +40,10 @@ if (!is_dir($stateDir) && !mkdir($stateDir, 0700, true) && !is_dir($stateDir)) {
     respond(['ok' => false, 'error' => 'Could not create the local runtime folder.'], 500);
 }
 
+$playwrightPublicHost = trim((string)(getenv('BOTDECK_PUBLIC_HOST') ?: 'desktop-4ajaj6b.taile1603c.ts.net'));
 $definitions = [
     'birth' => ['name' => 'Birth Auto Telegram', 'kind' => 'Telegram bot', 'description' => 'Receives Telegram messages using long polling.', 'runtime' => 'PHP 8 · cURL', 'endpoint' => 'Telegram Bot API', 'script' => $root . DIRECTORY_SEPARATOR . 'Birth_auto_tg' . DIRECTORY_SEPARATOR . 'bot.php', 'workdir' => $root . DIRECTORY_SEPARATOR . 'Birth_auto_tg', 'interpreter' => 'php'],
-    'playwright' => ['name' => 'Playwright Service', 'kind' => 'Browser automation', 'description' => 'Creates and manages local browser sessions for verification.', 'runtime' => 'Node.js · Playwright', 'endpoint' => 'http://127.0.0.1:3011/session', 'script' => $root . DIRECTORY_SEPARATOR . 'playwright-service-upload' . DIRECTORY_SEPARATOR . 'playwright-server.js', 'workdir' => $root . DIRECTORY_SEPARATOR . 'playwright-service-upload', 'interpreter' => 'node'],
+    'playwright' => ['name' => 'Playwright Service', 'kind' => 'Browser automation', 'description' => 'Creates and manages browser sessions through Tailscale.', 'runtime' => 'Node.js · Playwright', 'endpoint' => 'https://' . $playwrightPublicHost . '/session', 'script' => $root . DIRECTORY_SEPARATOR . 'playwright-service-upload' . DIRECTORY_SEPARATOR . 'playwright-server.js', 'workdir' => $root . DIRECTORY_SEPARATOR . 'playwright-service-upload', 'interpreter' => 'node'],
 ];
 
 function statePath(string $id, string $suffix = '.json'): string { global $stateDir; return $stateDir . DIRECTORY_SEPARATOR . $id . $suffix; }
@@ -224,6 +225,7 @@ function startService(string $id, array $definition, string $token = ''): array
     if ($id === 'birth') $environment['TELEGRAM_BOT_TOKEN'] = $token;
     else {
         $environment['BOTDECK_CONTROL_TOKEN'] = $controlToken;
+        $environment['BOTDECK_PUBLIC_HOST'] = $playwrightPublicHost;
         $environment['PORT'] = '3011';
     }
 
