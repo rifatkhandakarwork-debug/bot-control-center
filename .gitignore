@@ -1,0 +1,9 @@
+/playwright-service-upload/node_modules/
+/playwright-service-upload/.git/
+**/.git/
+/Birth_auto_tg.zip
+/runtime/
+/.vscode/
+/.idea/
+*.log
+*.tmp

@@ -1,0 +1,13 @@
+{
+    "name": "playwright-service",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "start": "node playwright-server.js",
+        "test": "node ../tests/integration.cjs && node ../tests/ui-smoke.cjs",
+        "postinstall": "playwright install chromium"
+    },
+    "dependencies": {
+        "playwright": "^1.51.1"
+    }
+}
