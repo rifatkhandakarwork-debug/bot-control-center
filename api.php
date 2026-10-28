@@ -40,7 +40,9 @@ if (!is_dir($stateDir) && !mkdir($stateDir, 0700, true) && !is_dir($stateDir)) {
     respond(['ok' => false, 'error' => 'Could not create the local runtime folder.'], 500);
 }
 
-$playwrightPublicHost = trim((string)(getenv('BOTDECK_PUBLIC_HOST') ?: 'desktop-4ajaj6b.taile1603c.ts.net'));
+$playwrightHostFile = $root . DIRECTORY_SEPARATOR . 'playwright-service-upload' . DIRECTORY_SEPARATOR . '.tailscale-host';
+$configuredPlaywrightHost = is_file($playwrightHostFile) ? trim((string)@file_get_contents($playwrightHostFile)) : '';
+$playwrightPublicHost = trim((string)($configuredPlaywrightHost ?: getenv('BOTDECK_PUBLIC_HOST') ?: 'desktop-4ajaj6b.taile1603c.ts.net'));
 $definitions = [
     'birth' => ['name' => 'Birth Auto Telegram', 'kind' => 'Telegram bot', 'description' => 'Receives Telegram messages using long polling.', 'runtime' => 'PHP 8 · cURL', 'endpoint' => 'Telegram Bot API', 'script' => $root . DIRECTORY_SEPARATOR . 'Birth_auto_tg' . DIRECTORY_SEPARATOR . 'bot.php', 'workdir' => $root . DIRECTORY_SEPARATOR . 'Birth_auto_tg', 'interpreter' => 'php'],
     'playwright' => ['name' => 'Playwright Service', 'kind' => 'Browser automation', 'description' => 'Creates and manages browser sessions through Tailscale.', 'runtime' => 'Node.js · Playwright', 'endpoint' => 'https://' . $playwrightPublicHost . '/session', 'script' => $root . DIRECTORY_SEPARATOR . 'playwright-service-upload' . DIRECTORY_SEPARATOR . 'playwright-server.js', 'workdir' => $root . DIRECTORY_SEPARATOR . 'playwright-service-upload', 'interpreter' => 'node'],

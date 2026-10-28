@@ -1,5 +1,6 @@
 /playwright-service-upload/node_modules/
 /playwright-service-upload/.git/
+/playwright-service-upload/.tailscale-host
 **/.git/
 /Birth_auto_tg.zip
 /runtime/

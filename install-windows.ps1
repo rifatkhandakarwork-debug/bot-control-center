@@ -27,8 +27,49 @@ function Install-WingetPackage([string]$Id, [string]$ExtraArgs = '') {
     if ($LASTEXITCODE -ne 0) { throw "winget could not install $Id (exit code $LASTEXITCODE). Install it manually and run this command again." }
 }
 
+function Find-TailscaleCli {
+    foreach ($candidate in @((Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'), 'C:\Program Files\Tailscale\tailscale.exe')) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    $command = Get-Command tailscale.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    return $null
+}
+
+function Read-TailscaleStatus([string]$Cli) {
+    $raw = & $Cli status --json 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
+    try { return ($raw | ConvertFrom-Json) } catch { return $null }
+}
+
 if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
     throw 'Windows Package Manager (winget) is required. Install/update App Installer from Microsoft Store, then rerun this command.'
+}
+
+$tailscale = Find-TailscaleCli
+if (-not $tailscale) {
+    Install-WingetPackage 'Tailscale.Tailscale'
+    $tailscale = Find-TailscaleCli
+}
+if (-not $tailscale) { throw 'Tailscale was not found after installation. Install it from tailscale.com/download/windows and rerun setup.' }
+
+$tailnetStatus = Read-TailscaleStatus $tailscale
+if (-not $tailnetStatus -or $tailnetStatus.BackendState -ne 'Running') {
+    $tailscaleUi = Join-Path (Split-Path -Parent $tailscale) 'tailscale-ipn.exe'
+    if (Test-Path -LiteralPath $tailscaleUi) { Start-Process -FilePath $tailscaleUi }
+    Write-Host 'Sign in to Tailscale in the window that opened. If needed, click the Tailscale tray icon and choose Log in. Waiting for this PC to connect...' -ForegroundColor Yellow
+    for ($attempt = 0; $attempt -lt 120; $attempt++) {
+        Start-Sleep -Seconds 5
+        $tailnetStatus = Read-TailscaleStatus $tailscale
+        if ($tailnetStatus -and $tailnetStatus.BackendState -eq 'Running') { break }
+    }
+}
+if (-not $tailnetStatus -or $tailnetStatus.BackendState -ne 'Running') {
+    throw 'Tailscale is not connected yet. Finish sign-in from its tray icon, then rerun this setup command.'
+}
+$tailnetHost = ([string]$tailnetStatus.Self.DNSName).Trim().TrimEnd('.').ToLowerInvariant()
+if ($tailnetHost -notmatch '^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$') {
+    throw "Could not read this device's Tailscale DNS name ($tailnetHost). Confirm MagicDNS is enabled, then rerun setup."
 }
 
 $xampp = Find-XamppRoot
@@ -78,6 +119,7 @@ try {
 }
 
 $servicePath = Join-Path $destination 'playwright-service-upload'
+Set-Content -LiteralPath (Join-Path $servicePath '.tailscale-host') -Value $tailnetHost -NoNewline -Encoding Ascii
 Push-Location $servicePath
 try {
     Write-Host 'Installing Playwright dependencies and Chromium...' -ForegroundColor Cyan
@@ -95,7 +137,16 @@ $playwrightUrl = 'http://localhost/all_bot/api.php?action=start'
 $playwrightResult = Invoke-RestMethod -Method Post -Uri $playwrightUrl -Headers @{ Origin = 'http://localhost'; 'X-Botdeck-Request' = '1' } -ContentType 'application/json' -Body '{"id":"playwright"}'
 if (-not $playwrightResult.ok) { throw "Apache is running, but the Playwright service did not start: $($playwrightResult.error)" }
 
+Write-Host 'Enabling Tailscale Funnel for the Playwright service...' -ForegroundColor Cyan
+$funnelOutput = & $tailscale funnel --bg --yes 3011 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Tailscale Funnel could not be enabled. Check Tailscale Admin Console policy (MagicDNS, HTTPS, and Funnel permissions), then rerun setup.`n$funnelOutput" }
+$funnelStatus = (& $tailscale funnel status 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0 -or $funnelStatus -notmatch [regex]::Escape($tailnetHost)) {
+    throw "Tailscale Funnel did not report the expected hostname. Check Funnel settings and rerun setup.`n$funnelStatus"
+}
+
 Write-Host ''
-Write-Host 'Setup complete. Apache and the Playwright service are running.' -ForegroundColor Green
+Write-Host 'Setup complete. Apache, Playwright, and Tailscale Funnel are running.' -ForegroundColor Green
+Write-Host "Playwright URL: https://$tailnetHost/session" -ForegroundColor Green
 Write-Host 'Open http://localhost/all_bot/ and start the services from the dashboard.'
 Start-Process 'http://localhost/all_bot/'
