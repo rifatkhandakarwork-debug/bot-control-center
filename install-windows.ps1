@@ -42,9 +42,41 @@ function Read-TailscaleStatus([string]$Cli) {
     try { return ($raw | ConvertFrom-Json) } catch { return $null }
 }
 
-if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-    throw 'Windows Package Manager (winget) is required. Install/update App Installer from Microsoft Store, then rerun this command.'
+function Ensure-Winget {
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) { return }
+
+    Write-Host 'winget is missing. Bootstrapping Windows Package Manager...' -ForegroundColor Cyan
+    $windowsApps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+    try {
+        $appInstaller = Get-AppxPackage -Name Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue
+        if ($appInstaller) {
+            Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop
+        }
+        if ((Test-Path (Join-Path $windowsApps 'winget.exe')) -and $env:Path -notlike "*$windowsApps*") {
+            $env:Path = "$windowsApps;$env:Path"
+        }
+        if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null
+            Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope CurrentUser -Confirm:$false
+            Import-Module Microsoft.WinGet.Client -Force
+            Repair-WinGetPackageManager -Force -Latest | Out-Null
+        }
+    } catch {
+        throw "Automatic winget setup failed: $($_.Exception.Message) Install/update Microsoft's App Installer, then rerun this command."
+    }
+
+    if ($env:Path -notlike "*$windowsApps*") { $env:Path = "$windowsApps;$env:Path" }
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        $wingetPath = Join-Path $windowsApps 'winget.exe'
+        if (Test-Path -LiteralPath $wingetPath) { $env:Path = "$windowsApps;$env:Path" }
+    }
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        throw 'winget bootstrap completed but winget.exe is still unavailable. Restart PowerShell and rerun this command.'
+    }
 }
+
+Ensure-Winget
 
 $tailscale = Find-TailscaleCli
 if (-not $tailscale) {
