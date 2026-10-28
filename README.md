@@ -11,10 +11,10 @@ A local XAMPP dashboard for the services in this workspace. It manages only the 
 
 ## One-command setup on Windows
 
-After this project is in a **public GitHub repository**, open PowerShell on the other Windows PC and replace `OWNER/REPO` below with its GitHub owner and repository name (for example, `sanjana/bot-dashboard`):
+Open PowerShell on the other Windows PC and run:
 
 ```powershell
-$repo = 'OWNER/REPO'; $script = (Invoke-WebRequest "https://raw.githubusercontent.com/$repo/main/install-windows.ps1").Content; & ([scriptblock]::Create($script)) -Repository $repo
+$repo = 'rifatkhandakarwork-debug/bot-control-center'; $script = (Invoke-WebRequest "https://raw.githubusercontent.com/$repo/main/install-windows.ps1").Content; & ([scriptblock]::Create($script)) -Repository $repo
 ```
 
 The setup checks for XAMPP, Node.js LTS, and Google Chrome and installs missing programs through Windows Package Manager (`winget`). It downloads the repository into XAMPP's `htdocs\all_bot`, installs the pinned Playwright dependencies and Chromium, starts Apache and the Playwright service, and opens the dashboard. The Telegram bot remains stopped until you enter its token in the dashboard. Windows may ask for administrator approval when installing system software. Install/update **App Installer** from Microsoft Store first if `winget` is unavailable. The destination must not already exist; move/remove an older copy before running setup again. A private GitHub repository needs authentication and is not supported by this one-command download.
