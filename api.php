@@ -140,6 +140,19 @@ function httpJson(string $path, int $timeout = 2): array
     if ($status !== 200 || !is_array($body) || empty($body['ok'])) return ['ok' => false, 'error' => $status ? 'HTTP health check returned ' . $status . '.' : 'HTTP endpoint did not respond.'];
     return $body;
 }
+function publicHealth(string $host, int $timeout = 2): array
+{
+    if (!preg_match('/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i', $host)) return ['ok' => false, 'error' => 'Public hostname is invalid.'];
+    $context = stream_context_create(['http' => ['timeout' => $timeout, 'ignore_errors' => true, 'follow_location' => 0, 'header' => "Accept: application/json\r\nConnection: close\r\n"], 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]]);
+    $body = @file_get_contents('https://' . $host . '/health', false, $context);
+    $status = 0;
+    foreach ($http_response_header ?? [] as $header) if (preg_match('/^HTTP\/\S+\s+(\d+)/i', $header, $match)) $status = (int)$match[1];
+    $data = is_string($body) ? json_decode($body, true) : null;
+    if ($status !== 200 || !is_array($data) || empty($data['ok']) || ($data['process'] ?? '') !== 'running') {
+        return ['ok' => false, 'error' => $status ? 'Public endpoint returned HTTP ' . $status . ' instead of Playwright health.' : 'Public endpoint did not respond.'];
+    }
+    return ['ok' => true];
+}
 function readBotHealth(array $state): array
 {
     $path = (string)($state['healthFile'] ?? '');
@@ -195,7 +208,7 @@ function findNodeExecutable(): string
 }
 function startService(string $id, array $definition, string $token = ''): array
 {
-    global $healthInterval;
+    global $healthInterval, $playwrightPublicHost;
     $state = readState($id);
     if (processRunning($id, $definition, $state)) return ['ok' => true, 'alreadyRunning' => true];
     if (!is_file($definition['script'])) return ['ok' => false, 'error' => 'Configured service script was not found.'];
@@ -350,12 +363,14 @@ if ($action === 'status' && $method === 'GET') {
         if ($bot['id'] === 'playwright' && $bot['running']) {
             $state = readState('playwright');
             $http = httpJson('/health', $healthTimeout);
-            if (!$http['ok']) $bot['health'] = ['status' => 'unreachable', 'checkedAt' => time(), 'lastError' => $http['error']];
+            $public = publicHealth($playwrightPublicHost, $healthTimeout);
+            if (!$http['ok']) $bot['health'] = ['status' => 'unreachable', 'checkedAt' => time(), 'lastError' => $http['error'], 'publicEndpoint' => $public['ok'] ? 'healthy' : 'unreachable'];
+            elseif (!$public['ok']) $bot['health'] = ['status' => 'unreachable', 'checkedAt' => time(), 'lastError' => $public['error'], 'publicEndpoint' => 'unreachable'];
             else {
                 $cachedAt = (int)($state['health']['checkedAt'] ?? 0);
                 if ($cachedAt < time() - $healthInterval) {
                     $deep = httpJson('/health?deep=1', min(15, max(8, $healthTimeout)));
-                    $state['health'] = ['status' => !empty($deep['browserAutomation']) ? 'healthy' : 'degraded', 'checkedAt' => time(), 'http' => 'responding', 'browserAutomation' => !empty($deep['browserAutomation']), 'lastError' => (string)($deep['error'] ?? '')];
+                    $state['health'] = ['status' => !empty($deep['browserAutomation']) ? 'healthy' : 'degraded', 'checkedAt' => time(), 'http' => 'responding', 'publicEndpoint' => 'healthy', 'browserAutomation' => !empty($deep['browserAutomation']), 'lastError' => (string)($deep['error'] ?? '')];
                     writeState('playwright', $state);
                 }
                 if (($state['transition'] ?? '') === 'starting' && !empty($state['health']['browserAutomation'])) {
@@ -365,6 +380,10 @@ if ($action === 'status' && $method === 'GET') {
                     $bot['lastEvent'] = 'HTTP and browser health checks passed.';
                 }
                 $bot['health'] = $state['health'] ?? ['status' => 'checking', 'checkedAt' => 0, 'lastError' => ''];
+            }
+            if (!in_array($bot['health']['status'] ?? '', ['healthy'], true) && !in_array($bot['state'], ['starting', 'stopping'], true)) {
+                $bot['state'] = 'degraded';
+                if (($bot['health']['lastError'] ?? '') !== '') $bot['lastEvent'] = (string)$bot['health']['lastError'];
             }
         }
     }

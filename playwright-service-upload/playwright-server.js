@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
 const { chromium } = require('playwright');
 
@@ -10,6 +11,8 @@ const PUBLIC_HOST = String(process.env.BOTDECK_PUBLIC_HOST || '').toLowerCase();
 const MAX_BODY = 10_000;
 const CONTROL_TOKEN = process.env.BOTDECK_CONTROL_TOKEN || '';
 const BROWSER_HEALTH_INTERVAL_MS = Math.max(5_000, Math.min(300_000, Number(process.env.BOTDECK_BROWSER_HEALTH_INTERVAL_MS) || 15_000));
+const NETWORK_CHECK_INTERVAL_MS = Math.max(5_000, Math.min(60_000, Number(process.env.BOTDECK_NETWORK_CHECK_INTERVAL_MS) || 10_000));
+const NETWORK_FAILURES_BEFORE_PAUSE = 2;
 const sessions = new Map();
 const queue = [];
 let active = 0;
@@ -17,6 +20,10 @@ let browser = null;
 let idleTimer = null;
 let closing = false;
 let lastBrowserCheck = null;
+let networkAvailable = true;
+let networkFailures = 0;
+let networkCheckRunning = false;
+let serverListening = false;
 
 function log(level, event, message = '') {
   const safe = String(message).replace(/\b\d{5,15}:[A-Za-z0-9_-]{20,}\b/g, '[REDACTED TOKEN]').replace(/[\r\n\t]+/g, ' ').slice(0, 500);
@@ -66,6 +73,7 @@ function browserOptions() {
 
 async function getBrowser() {
   if (closing) throw new Error('Service is shutting down.');
+  if (!networkAvailable) throw Object.assign(new Error('Internet connection is unavailable. The service will resume automatically when it returns.'), { status: 503 });
   if (!browser || !browser.isConnected()) {
     browser = await chromium.launch(browserOptions());
     browser.on('disconnected', () => { browser = null; });
@@ -105,6 +113,61 @@ async function closeSession(id, reason = 'closed') {
   release();
   scheduleIdleClose();
   log('info', 'session_closed', `Session ${id} closed: ${reason}.`);
+}
+
+function checkNetwork() {
+  return new Promise(resolve => {
+    const request = https.request('https://everify.bdris.gov.bd/', { method: 'HEAD', timeout: 5_000 }, response => {
+      response.resume();
+      resolve(true);
+    });
+    request.on('timeout', () => request.destroy(new Error('Network check timed out.')));
+    request.on('error', () => resolve(false));
+    request.end();
+  });
+}
+
+async function refreshNetworkState() {
+  if (closing || networkCheckRunning) return;
+  networkCheckRunning = true;
+  try {
+    if (await checkNetwork()) {
+      networkFailures = 0;
+      if (!networkAvailable) {
+        networkAvailable = true;
+        lastBrowserCheck = null;
+        if (!serverListening) {
+          server.listen(PORT, HOST, () => {
+            serverListening = true;
+            log('info', 'network_restored', `Internet connectivity restored; Playwright service restarted on http://${HOST}:${PORT}.`);
+          });
+        } else {
+          log('info', 'network_restored', 'Internet connectivity restored; Playwright service is accepting requests again.');
+        }
+      }
+      return;
+    }
+    networkFailures += 1;
+    if (networkAvailable && networkFailures >= NETWORK_FAILURES_BEFORE_PAUSE) {
+      networkAvailable = false;
+      lastBrowserCheck = { ok: false, checkedAt: Date.now(), error: 'Internet connection is unavailable.' };
+      clearTimeout(idleTimer);
+      log('warn', 'network_lost', 'Internet connection lost; stopping the HTTP service and closing browser sessions.');
+      if (serverListening) {
+        serverListening = false;
+        server.close();
+        server.closeAllConnections();
+      }
+      await Promise.all([...sessions.keys()].map(id => closeSession(id, 'network disconnected')));
+      if (browser) {
+        const current = browser;
+        browser = null;
+        await current.close().catch(() => {});
+      }
+    }
+  } finally {
+    networkCheckRunning = false;
+  }
 }
 
 async function openSession(key = '') {
@@ -161,6 +224,7 @@ function readJsonBody(req) {
 
 async function checkBrowser() {
   const now = Date.now();
+  if (!networkAvailable) return { ok: false, checkedAt: now, error: 'Internet connection is unavailable.' };
   if (lastBrowserCheck && now - lastBrowserCheck.checkedAt < BROWSER_HEALTH_INTERVAL_MS) return lastBrowserCheck;
   let context;
   try {
@@ -212,6 +276,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'OPTIONS') return origin && (localOrigin(origin) || (isPublicRequest && publicOrigin(origin))) ? (res.writeHead(204).end()) : json(res, 403, { error: 'Origin is not allowed.', requestId });
   if (url.pathname === '/health' && req.method === 'GET') {
+    if (!networkAvailable) return json(res, 503, { ok: false, process: 'running', http: 'responding', network: 'offline', browserAutomation: false, active, queued: queue.length });
     if (url.searchParams.get('deep') === '1') {
       const result = await checkBrowser();
       return json(res, result.ok ? 200 : 503, { ok: result.ok, process: 'running', http: 'responding', browserAutomation: result.ok, browserCheckedAt: result.checkedAt, error: result.error || undefined, active, queued: queue.length });
@@ -286,7 +351,7 @@ const server = http.createServer(async (req, res) => {
     const birthNumber = String(data.birthNumber || '');
     const dob = String(data.dob || '');
     const captchaAnswer = String(data.captchaAnswer || '');
-    if (!/^\d{1,32}$/.test(birthNumber) || !/^\d{2}-\d{2}-\d{4}$/.test(dob) || captchaAnswer.length < 1 || captchaAnswer.length > 30) {
+    if (!/^\d{1,32}$/.test(birthNumber) || !/^\d{4}-\d{2}-\d{2}$/.test(dob) || captchaAnswer.length < 1 || captchaAnswer.length > 30) {
       log('warn', 'submit_rejected', `Request ${requestId}: invalid input format for session ${sessionId} (HTTP 400).`);
       return json(res, 400, { error: 'Birth number, date, or CAPTCHA format is invalid.', requestId });
     }
@@ -297,9 +362,22 @@ const server = http.createServer(async (req, res) => {
       await item.page.locator('#ubrn').fill(birthNumber);
       await item.page.locator('#BirthDate').fill(dob);
       await item.page.locator('#CaptchaInputText').fill(captchaAnswer);
+      const body = item.page.locator('body');
+      const initialText = await body.innerText();
       await item.page.locator('input[type="submit"]').evaluate(element => element.click());
-      await item.page.waitForTimeout(2_500);
-      const result = await item.page.locator('body').innerText();
+      const deadline = Date.now() + 15_000;
+      let result = initialText;
+      let lastChangeAt = Date.now();
+      while (Date.now() < deadline) {
+        await item.page.waitForTimeout(300);
+        const currentText = await body.innerText();
+        if (currentText !== result) {
+          result = currentText;
+          lastChangeAt = Date.now();
+        } else if (result !== initialText && Date.now() - lastChangeAt >= 1_200) {
+          break;
+        }
+      }
       submitCompleted = true;
       log('info', 'verification_submit_completed', `Submission finished for session ${sessionId}; response received in ${Date.now() - submitStartedAt} ms (request ${requestId}).`);
       return json(res, 200, { sessionId, result: result.slice(0, 4_000), requestId });
@@ -313,10 +391,15 @@ const server = http.createServer(async (req, res) => {
 
 server.requestTimeout = 15_000;
 server.headersTimeout = 10_000;
-server.listen(PORT, HOST, () => log('info', 'service_started', `HTTP service listening on http://${HOST}:${PORT}.`));
+server.listen(PORT, HOST, () => {
+  serverListening = true;
+  log('info', 'service_started', `HTTP service listening on http://${HOST}:${PORT}.`);
+});
 server.on('error', error => { log('error', 'server_error', error.message); process.exitCode = 1; });
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
 setInterval(async () => {
   for (const [id, item] of sessions) if (Date.now() - item.created > 600_000) await closeSession(id, 'expired after ten minutes');
 }, 30_000).unref();
+setInterval(refreshNetworkState, NETWORK_CHECK_INTERVAL_MS).unref();
+refreshNetworkState();

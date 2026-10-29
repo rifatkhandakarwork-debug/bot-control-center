@@ -223,6 +223,8 @@ declare(strict_types=1);
     .badge.starting::before, .badge.stopping::before { background: #c78b22; animation: pulse 1.2s ease-in-out infinite; }
     .badge.error { background: #fff0ef; color: var(--red); }
     .badge.error::before { background: #c84c47; }
+    .badge.degraded { background: #fff5df; color: var(--amber); }
+    .badge.degraded::before { background: #c78b22; }
     .badge.unknown { background: #f0f2f5; color: var(--muted); }
     .description { min-height: 40px; margin: 13px 0; color: #43566d; font-size: 13px; line-height: 1.5; }
     .details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px 15px; padding-top: 13px; border-top: 1px solid var(--line-soft); }
@@ -383,7 +385,7 @@ declare(strict_types=1);
 
     <section class="overview" aria-label="Service summary">
       <div class="metric"><div class="metric-label">Total services</div><div class="metric-value" id="total">—</div><div class="metric-foot">Configured in this workspace</div></div>
-      <div class="metric"><div class="metric-label">Running</div><div class="metric-value" id="running">—</div><div class="metric-foot">Active processes</div></div>
+      <div class="metric"><div class="metric-label">Processes alive</div><div class="metric-value" id="running">—</div><div class="metric-foot">May need service attention</div></div>
       <div class="metric"><div class="metric-label">Stopped</div><div class="metric-value" id="stopped">—</div><div class="metric-foot">Not currently running</div></div>
       <div class="metric"><div class="metric-label">Errors</div><div class="metric-value" id="errors">—</div><div class="metric-foot">Needs attention</div></div>
     </section>
@@ -495,7 +497,7 @@ declare(strict_types=1);
         return { label: 'Waiting for first poll', className: 'health-warn' };
       }
       if (health.status === 'healthy') return { label: 'HTTP + browser ready', className: 'health-good' };
-      if (health.status === 'unreachable') return { label: 'Endpoint unreachable', className: 'health-bad' };
+      if (health.status === 'unreachable') return { label: health.publicEndpoint === 'unreachable' ? 'Public endpoint unreachable' : 'Endpoint unreachable', className: 'health-bad' };
       if (health.status === 'degraded') return { label: 'Browser check failed', className: 'health-bad' };
       return { label: 'Health check pending', className: 'health-warn' };
     }
@@ -525,7 +527,7 @@ declare(strict_types=1);
     }
 
     function stateLabel(bot) {
-      return ({ running: 'Running', stopped: 'Stopped', error: 'Error', starting: 'Starting', stopping: 'Stopping', unknown: 'Unknown' })[bot.state] || 'Unknown';
+      return ({ running: 'Running', stopped: 'Stopped', error: 'Error', degraded: 'Needs attention', starting: 'Starting', stopping: 'Stopping', unknown: 'Unknown' })[bot.state] || 'Unknown';
     }
 
     function hasError(bot) {
@@ -578,7 +580,7 @@ declare(strict_types=1);
       const health = healthInfo(bot);
       const badge = card.querySelector('[data-field="badge"]');
       badge.textContent = stateLabel(bot);
-      badge.className = `badge ${['running', 'stopped', 'starting', 'stopping', 'error'].includes(bot.state) ? bot.state : 'unknown'}`;
+      badge.className = `badge ${['running', 'stopped', 'starting', 'stopping', 'error', 'degraded'].includes(bot.state) ? bot.state : 'unknown'}`;
       setText('name', bot.name);
       setText('kind', bot.kind);
       setText('description', bot.description);
